@@ -1,0 +1,5 @@
+This is serial and CUDA code for a model of diffusion to be used during the
+CUDA lesson at the 2018 Petascale Institute.
+
+The documentation for that lesson is here:
+https://docs.google.com/document/d/16X05JurqkiHWaKcqNRLGQWQq2C8pRSwXcqI1X9eI7qw/edit#
