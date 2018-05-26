@@ -251,7 +251,7 @@ void CalcCells()
     for (col = 0; col < NumCols; col++)
     {
       // Start with nothing
-      CellsWithoutBounds[row * NumCols + col]  = 0.0;
+      CellsWithoutBounds[row * NumCols + col] = 0.0;
 
       // Add the top neighbor
       CellsWithoutBounds[row * NumCols + col] +=

@@ -183,6 +183,7 @@ void CheckMalloc(void * const val)
 // Allocate memory for dynamic arrays of cell values
 void AllocMemory()
 {
+  // Allocate memory on the host
   CellsWithBounds    = (float *)malloc(NumCellsWithBounds * sizeof(float));
   CheckMalloc(CellsWithBounds);
 
@@ -190,6 +191,7 @@ void AllocMemory()
     sizeof(float));
   CheckMalloc(CellsWithoutBounds);
 
+  // Allocate memory on the device
   TryCuda(cudaMalloc((void**)&d_CellsWithBounds, NumCellsWithBounds *
     sizeof(float)));
   TryCuda(cudaMalloc((void**)&d_CellsWithoutBounds, NumCellsWithoutBounds *
@@ -252,55 +254,65 @@ void PrintCells(int const time)
 // wrong.
 void CalcCells()
 {
-  int row;
-  int col;
+  CalcCells_kernel<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>
+    (d_CellsWithBounds, d_CellsWithoutBounds, NumCellsWithBounds, NumCols);
+}
 
-  // TODO - This loop would be a good candidate for GPGPU parallelism
-  CalcCells_kernel<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>();
-  for (row = 0; row < NumRows; row++)
+__global__ void CalcCells_kernel(float * const d_CellsWithBounds,
+  float * const d_CellsWithoutBounds, int const NumCellsWithBounds,
+  int const NumCols)
+{
+  // Calculate the unique ID, row, and column for the current CUDA thread
+  int const threadId = blockIdx.x * blockDim.x + threadIdx.x;
+  int const row = threadId / NumCols;
+  int const col = threadId % NumCols;
+
+  // All threads whose thread ID is >= the count will NOT do the following,
+  // thus avoiding writing into un-allocated space.
+  if (threadId < NumCellsWithBounds)
   {
-    for (col = 0; col < NumCols; col++)
-    {
-      // Start with nothing
-      CellsWithoutBounds[row * NumCols + col]  = 0.0;
+    // Start with nothing
+    d_CellsWithoutBounds[row * NumCols + col] = 0.0;
 
-      // Add the top neighbor
-      CellsWithoutBounds[row * NumCols + col] +=
-        CellsWithBounds[row * (NumCols + 2) + col + 1];
+    // Add the top neighbor
+    d_CellsWithoutBounds[row * NumCols + col] +=
+      d_CellsWithBounds[row * (NumCols + 2) + col + 1];
 
-      // Add the left neighbor
-      CellsWithoutBounds[row * NumCols + col] +=
-        CellsWithBounds[(row + 1) * (NumCols + 2) + col];
+    // Add the left neighbor
+    d_CellsWithoutBounds[row * NumCols + col] +=
+      d_CellsWithBounds[(row + 1) * (NumCols + 2) + col];
 
-      // Add the right neighbor
-      CellsWithoutBounds[row * NumCols + col] +=
-        CellsWithBounds[(row + 1) * (NumCols + 2) + col + 2];
+    // Add the right neighbor
+    d_CellsWithoutBounds[row * NumCols + col] +=
+      d_CellsWithBounds[(row + 1) * (NumCols + 2) + col + 2];
 
-      // Add the bottom neighbor
-      CellsWithoutBounds[row * NumCols + col] +=
-        CellsWithBounds[(row + 2) * (NumCols + 2) + col + 1];
+    // Add the bottom neighbor
+    d_CellsWithoutBounds[row * NumCols + col] +=
+      d_CellsWithBounds[(row + 2) * (NumCols + 2) + col + 1];
 
-      // Divide by 4 (multiplication is a bit faster, so multiply by 1/4)
-      CellsWithoutBounds[row * NumCols + col] *= 0.25;
-    }
+    // Divide by 4 (multiplication is a bit faster, so multiply by 1/4)
+    d_CellsWithoutBounds[row * NumCols + col] *= 0.25;
   }
 }
 
 // Make sure both arrays have the new average of nearest-neighbors for each cell
 void CopyCells()
 {
-  int row;
-  int col;
+  CopyCells_kernel<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>
+    (d_CellsWithBounds, d_CellsWithoutBounds, NumCellsWithBounds, NumCols);
+}
 
-  // TODO - This loop would be a good candidate for GPGPU parallelism
-  for (row = 0; row < NumRows; row++)
-  {
-    for (col = 0; col < NumCols; col++)
-    {
-      CellsWithBounds[(row + 1) * (NumCols + 2) + col + 1] =
-        CellsWithoutBounds[row * NumCols + col];
-    }
-  }
+__global__ void CopyCells_kernel(float * const d_CellsWithBounds,
+  float * const d_CellsWithoutBounds, int const NumCellsWithBounds,
+  int const NumCols)
+{
+  // Calculate the unique ID, row, and column for the current CUDA thread
+  int const threadId = blockIdx.x * blockDim.x + threadIdx.x;
+  int const row = threadId / NumCols;
+  int const col = threadId % NumCols;
+
+  d_CellsWithBounds[(row + 1) * (NumCols + 2) + col + 1] =
+    d_CellsWithoutBounds[row * NumCols + col];
 }
 
 // Run the simulation
@@ -308,14 +320,19 @@ void Simulate()
 {
   int time;
 
-  // TODO - This would be a good place to copy data from the host to the device
+  // Copy data from the host to the device
+  TryCuda(cudaMemcpy(d_CellsWithBounds, CellsWithBounds,
+    NumCellsWithBounds * sizeof(float), cudaMemcpyHostToDevice));
+  TryCuda(cudaMemcpy(d_CellsWithoutBounds, CellsWithoutBounds,
+    NumCellsWithoutBounds * sizeof(float), cudaMemcpyHostToDevice));
 
   for (time = 0; time < NumSteps; time++)
   {
     if (IsPrinting)
     {
-      // TODO - You will need to copy data from the device to the host here so
-      // it can printed
+      // Copy data from the device to the host so it can printed
+      TryCuda(cudaMemcpy(CellsWithoutBounds, d_CellsWithoutBounds,
+        NumCellsWithoutBounds * sizeof(float), cudaMemcpyDeviceToHost));
 
       // Print the values of each cell to the standard output
       PrintCells(time);
@@ -335,6 +352,11 @@ void Simulate()
 // De-allocate memory for dynamic arrays of cell values
 void FreeMemory()
 {
+  // Free the device memory
+  TryCuda(cudaFree(d_CellsWithoutBounds));
+  TryCuda(cudaFree(d_CellsWithBounds));
+
+  // Free the host memory
   free(CellsWithoutBounds);
   free(CellsWithBounds);
 }
