@@ -118,7 +118,7 @@ void CalcNumCells()
   NumCellsWithoutBounds = NumRows * NumCols;
 }
 
-// Calculate the number of characters to use in displaying a single heat value
+// Calculate the number of characters to use in displaying a single value
 void CalcCellCharSize()
 {
   int numDigits;
@@ -198,7 +198,7 @@ void InitializeArrays()
     CellsWithBounds[col + 1] = TopVal;
 
     // Set the bottom bound
-    CellsWithBounds[NumRows * (NumCols + 2) + col + 1] = BottomVal;
+    CellsWithBounds[(NumRows + 1) * (NumCols + 2) + col + 1] = BottomVal;
   }
 
   for (row = 0; row < NumRows; row++)
@@ -213,7 +213,7 @@ void InitializeArrays()
     }
 
     // Set the right bound
-    CellsWithBounds[(row + 1) * (NumCols + 2) + NumCols] = LeftVal;
+    CellsWithBounds[(row + 1) * (NumCols + 2) + NumCols + 1] = LeftVal;
   }
 }
 
@@ -343,7 +343,7 @@ int main(int argc, char ** argv)
   // Calculate the number of cells in the world
   CalcNumCells();
 
-  // Calculate the number of characters to use in displaying a single heat value
+  // Calculate the number of characters to use in displaying a single value
   CalcCellCharSize();
 
   // Allocate memory for dynamic arrays of cell values

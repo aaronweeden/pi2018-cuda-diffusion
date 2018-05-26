@@ -18,10 +18,24 @@
  * Libraries *
  *************/
 #include <omp.h> // For omp_get_wtime()
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+
+/*************
+ * Constants *
+ *************/
+// Define the number of CUDA threads in each CUDA warp (group of threads that
+// execute instructions in lock-step)
+#define THREADS_PER_WARP 32
+
+// Define the maximum number of CUDA warps in each CUDA block
+#define MAX_WARPS_PER_BLOCK 16
+
+// Define the number of CUDA threads in each CUDA block
+#define THREADS_PER_BLOCK ((THREADS_PER_WARP) * (MAX_WARPS_PER_BLOCK))
 
 /********************
  * Global variables *
@@ -48,6 +62,7 @@ float * CellsWithoutBounds; // Array of cell values, not including the bounds.
 // memory with the other one by not including them.
 float * d_CellsWithBounds;
 float * d_CellsWithoutBounds;
+int BlocksPerGrid; // Calculated later
 
 /**********************
  Function definitions *
@@ -125,7 +140,7 @@ void CalcNumCells()
   NumCellsWithoutBounds = NumRows * NumCols;
 }
 
-// Calculate the number of characters to use in displaying a single heat value
+// Calculate the number of characters to use in displaying a single value
 void CalcCellCharSize()
 {
   int numDigits;
@@ -210,7 +225,7 @@ void InitializeArrays()
     CellsWithBounds[col + 1] = TopVal;
 
     // Set the bottom bound
-    CellsWithBounds[NumRows * (NumCols + 2) + col + 1] = BottomVal;
+    CellsWithBounds[(NumRows + 1) * (NumCols + 2) + col + 1] = BottomVal;
   }
 
   for (row = 0; row < NumRows; row++)
@@ -225,7 +240,7 @@ void InitializeArrays()
     }
 
     // Set the right bound
-    CellsWithBounds[(row + 1) * (NumCols + 2) + NumCols] = LeftVal;
+    CellsWithBounds[(row + 1) * (NumCols + 2) + NumCols + 1] = LeftVal;
   }
 }
 
@@ -252,25 +267,20 @@ void PrintCells(int const time)
 // Calculate the average of nearest-neighbors for each cell. Make sure not
 // to check and change values in the same array, or the calculation will be
 // wrong.
-void CalcCells()
-{
-  CalcCells_kernel<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>
-    (d_CellsWithBounds, d_CellsWithoutBounds, NumCellsWithBounds, NumCols);
-}
-
 __global__ void CalcCells_kernel(float * const d_CellsWithBounds,
-  float * const d_CellsWithoutBounds, int const NumCellsWithBounds,
+  float * const d_CellsWithoutBounds, int const NumCellsWithoutBounds,
   int const NumCols)
 {
-  // Calculate the unique ID, row, and column for the current CUDA thread
+  // Calculate the unique ID for the current CUDA thread
   int const threadId = blockIdx.x * blockDim.x + threadIdx.x;
-  int const row = threadId / NumCols;
-  int const col = threadId % NumCols;
 
   // All threads whose thread ID is >= the count will NOT do the following,
   // thus avoiding writing into un-allocated space.
-  if (threadId < NumCellsWithBounds)
+  if (threadId < NumCellsWithoutBounds)
   {
+    int const row = threadId / NumCols;
+    int const col = threadId % NumCols;
+
     // Start with nothing
     d_CellsWithoutBounds[row * NumCols + col] = 0.0;
 
@@ -295,24 +305,36 @@ __global__ void CalcCells_kernel(float * const d_CellsWithBounds,
   }
 }
 
-// Make sure both arrays have the new average of nearest-neighbors for each cell
-void CopyCells()
+void CalcCells()
 {
-  CopyCells_kernel<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>
-    (d_CellsWithBounds, d_CellsWithoutBounds, NumCellsWithBounds, NumCols);
+  CalcCells_kernel<<<BlocksPerGrid, THREADS_PER_BLOCK>>>
+    (d_CellsWithBounds, d_CellsWithoutBounds, NumCellsWithoutBounds, NumCols);
 }
 
+// Make sure both arrays have the new average of nearest-neighbors for each cell
 __global__ void CopyCells_kernel(float * const d_CellsWithBounds,
-  float * const d_CellsWithoutBounds, int const NumCellsWithBounds,
+  float * const d_CellsWithoutBounds, int const NumCellsWithoutBounds,
   int const NumCols)
 {
-  // Calculate the unique ID, row, and column for the current CUDA thread
+  // Calculate the unique ID for the current CUDA thread
   int const threadId = blockIdx.x * blockDim.x + threadIdx.x;
-  int const row = threadId / NumCols;
-  int const col = threadId % NumCols;
 
-  d_CellsWithBounds[(row + 1) * (NumCols + 2) + col + 1] =
-    d_CellsWithoutBounds[row * NumCols + col];
+  // All threads whose thread ID is >= the count will NOT do the following,
+  // thus avoiding writing into un-allocated space.
+  if (threadId < NumCellsWithoutBounds)
+  {
+    int const row = threadId / NumCols;
+    int const col = threadId % NumCols;
+
+    d_CellsWithBounds[(row + 1) * (NumCols + 2) + col + 1] =
+      d_CellsWithoutBounds[row * NumCols + col];
+  }
+}
+
+void CopyCells()
+{
+  CopyCells_kernel<<<BlocksPerGrid, THREADS_PER_BLOCK>>>
+    (d_CellsWithBounds, d_CellsWithoutBounds, NumCellsWithoutBounds, NumCols);
 }
 
 // Run the simulation
@@ -374,7 +396,10 @@ int main(int argc, char ** argv)
   // Calculate the number of cells in the world
   CalcNumCells();
 
-  // Calculate the number of characters to use in displaying a single heat value
+  // Calculate number of CUDA blocks per grid
+  BlocksPerGrid = (int)ceil(1.0 * NumCellsWithBounds / THREADS_PER_BLOCK);
+
+  // Calculate the number of characters to use in displaying a single value
   CalcCellCharSize();
 
   // Allocate memory for dynamic arrays of cell values
