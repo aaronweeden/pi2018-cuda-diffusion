@@ -46,8 +46,6 @@ float * CellsWithoutBounds; // Array of cell values, not including the bounds.
 // get the wrong result. See the CalcCells() and CopyCells() functions.
 // We only need one of the arrays to have the cell boundaries; we can save
 // memory with the other one by not including them.
-// TODO - For each of the two arrays above, you will also need copies for the
-// device memory
 
 /**********************
  Function definitions *
@@ -180,8 +178,6 @@ void AllocMemory()
   CellsWithoutBounds = (float *)malloc(NumCellsWithoutBounds *
     sizeof(float));
   CheckMalloc(CellsWithoutBounds);
-
-  // TODO - This would be a good place to allocate memory on the device
 }
 
 // Set the initial cell values
@@ -244,6 +240,7 @@ void CalcCells()
   int col;
 
   // TODO - This loop would be a good candidate for GPGPU parallelism
+  CalcCells_kernel<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>();
   for (row = 0; row < NumRows; row++)
   {
     for (col = 0; col < NumCols; col++)
@@ -322,8 +319,6 @@ void Simulate()
 // De-allocate memory for dynamic arrays of cell values
 void FreeMemory()
 {
-  // TODO - This would be a good place to free the device memory
-
   free(CellsWithoutBounds);
   free(CellsWithBounds);
 }
