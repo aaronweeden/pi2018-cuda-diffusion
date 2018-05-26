@@ -52,6 +52,8 @@ float * CellsWithoutBounds; // Array of cell values, not including the bounds.
 /**********************
  Function definitions *
  **********************/
+// TODO - It is good practice to create a function to check whether a CUDA
+// call was successful
 
 // Check the command line arguments to see if the user provided any model
 // parameters

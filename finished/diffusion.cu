@@ -46,10 +46,21 @@ float * CellsWithoutBounds; // Array of cell values, not including the bounds.
 // get the wrong result. See the CalcCells() and CopyCells() functions.
 // We only need one of the arrays to have the cell boundaries; we can save
 // memory with the other one by not including them.
+float * d_CellsWithBounds;
+float * d_CellsWithoutBounds;
 
 /**********************
  Function definitions *
  **********************/
+// Check whether a CUDA call was successful
+void TryCuda(cudaError_t const err)
+{
+  if (err != cudaSuccess)
+  {
+    fprintf(stderr, "CUDA Error: %s\n", cudaGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
+}
 
 // Check the command line arguments to see if the user provided any model
 // parameters
@@ -178,6 +189,11 @@ void AllocMemory()
   CellsWithoutBounds = (float *)malloc(NumCellsWithoutBounds *
     sizeof(float));
   CheckMalloc(CellsWithoutBounds);
+
+  TryCuda(cudaMalloc((void**)&d_CellsWithBounds, NumCellsWithBounds *
+    sizeof(float)));
+  TryCuda(cudaMalloc((void**)&d_CellsWithoutBounds, NumCellsWithoutBounds *
+    sizeof(float)));
 }
 
 // Set the initial cell values
